@@ -49,7 +49,21 @@ export class CardSystem {
             this.cards.push(card);
             this.cardGroup.add(card.mesh);
         }
+        this.shuffleCards(); // 创建后随机洗牌
         this.stackCards();
+    }
+
+    // Fisher-Yates 洗牌算法 - 随机打乱卡牌顺序
+    shuffleCards() {
+        for (let i = this.cards.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            // 交换 cards 数组中的位置
+            [this.cards[i], this.cards[j]] = [this.cards[j], this.cards[i]];
+            // 更新卡牌的 index 属性
+            this.cards[i].index = i;
+            this.cards[j].index = j;
+        }
+        console.log('🎴 卡牌已洗牌！');
     }
 
     // 精美的卡背设计
@@ -574,6 +588,7 @@ export class CardSystem {
             card.isFlipped = false;
             gsap.set(card.mesh.scale, { x: 1, y: 1, z: 1 });
         });
+        this.shuffleCards(); // 重新洗牌
         this.stackCards();
     }
 
