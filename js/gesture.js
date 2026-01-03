@@ -24,7 +24,7 @@ export class GestureRecognizer {
         this.onEdgeScroll = null;
 
         this.lastGestureTime = 0;
-        this.gestureDelay = 400; // 增加延迟防止误触发
+        this.gestureDelay = 300; // 优化延迟时间
 
         // 边缘滚动
         this.edgeScrollTimer = null;
@@ -32,10 +32,20 @@ export class GestureRecognizer {
         this.edgeScrollInterval = 200;
         this.edgeThreshold = 0.18;
 
-        // 稳定识别
+        // 稳定识别 - 优化参数
         this.gestureHistory = [];
-        this.gestureHistorySize = 6;
-        this.gestureStableMin = 4;
+        this.gestureHistorySize = 6; // 适中的历史记录长度，平衡响应速度和稳定性
+        this.gestureStableMin = 4;   // 降低稳定性要求，提高响应速度
+
+        // 关键点平滑处理 - 使用指数移动平均
+        this.landmarkHistory = [];
+        this.landmarkHistorySize = 5; // 增加历史记录以提供更好的平滑
+        this.smoothingAlpha = 0.6; // EMA平滑系数 (0-1，越大越敏感)
+        this.smoothedLandmarks = null; // 存储平滑后的landmarks
+
+        // 位置平滑
+        this.positionHistory = [];
+        this.positionHistorySize = 5;
 
         // 调试模式
         this.debugMode = debugMode;
@@ -56,25 +66,27 @@ export class GestureRecognizer {
             locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
         });
 
+        // 优化MediaPipe配置 - 平衡精度和性能
         this.hands.setOptions({
             maxNumHands: 1,
-            modelComplexity: 1,
-            minDetectionConfidence: 0.7,
-            minTrackingConfidence: 0.5
+            modelComplexity: 1,                    // 使用中等复杂度模型，平衡性能和精度
+            minDetectionConfidence: 0.7,          // 适中的检测置信度
+            minTrackingConfidence: 0.5            // 降低追踪置信度，提高连续追踪稳定性
         });
 
         this.hands.onResults((results) => this.onResults(results));
 
+        // 提高摄像头分辨率以获得更清晰的识别效果
         this.camera = new Camera(this.videoElement, {
             onFrame: async () => {
                 await this.hands.send({ image: this.videoElement });
             },
-            width: 640,
-            height: 480
+            width: 1280,   // 提高分辨率
+            height: 720    // 提高分辨率
         });
 
         await this.camera.start();
-        this.updateStatus(true, '手势识别已启动');
+        this.updateStatus(true, '手势识别已启动（优化版）');
         this.isInitialized = true;
     }
 
@@ -83,12 +95,36 @@ export class GestureRecognizer {
         this.canvasCtx.clearRect(0, 0, this.canvasElement.width, this.canvasElement.height);
 
         if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-            const landmarks = results.multiHandLandmarks[0];
-            this.drawHand(landmarks);
-            this.analyzeGesture(landmarks);
+            const rawLandmarks = results.multiHandLandmarks[0];
+            // 应用平滑处理
+            const smoothedLandmarks = this.smoothLandmarks(rawLandmarks);
+            this.drawHand(smoothedLandmarks);
+            this.analyzeGesture(smoothedLandmarks);
         }
 
         this.canvasCtx.restore();
+    }
+
+    // 关键点平滑处理 - 使用指数移动平均(EMA)，更平滑且延迟更低
+    smoothLandmarks(landmarks) {
+        if (!this.smoothedLandmarks) {
+            // 首次初始化
+            this.smoothedLandmarks = landmarks.map(l => ({ ...l }));
+            return this.smoothedLandmarks;
+        }
+
+        // 使用EMA平滑：新值 = α * 当前值 + (1-α) * 旧值
+        const alpha = this.smoothingAlpha;
+        this.smoothedLandmarks = landmarks.map((landmark, index) => {
+            const smoothed = this.smoothedLandmarks[index];
+            return {
+                x: alpha * landmark.x + (1 - alpha) * smoothed.x,
+                y: alpha * landmark.y + (1 - alpha) * smoothed.y,
+                z: alpha * (landmark.z || 0) + (1 - alpha) * (smoothed.z || 0)
+            };
+        });
+
+        return this.smoothedLandmarks;
     }
 
     drawHand(landmarks) {
@@ -129,9 +165,21 @@ export class GestureRecognizer {
     analyzeGesture(landmarks) {
         const now = Date.now();
 
-        // 更新手位置 (用手掌中心)
+        // 更新手位置 (用手掌中心) - 添加位置平滑
         const palmCenter = landmarks[9];
-        this.handPosition = { x: palmCenter.x, y: palmCenter.y };
+        this.positionHistory.push({ x: palmCenter.x, y: palmCenter.y });
+        if (this.positionHistory.length > this.positionHistorySize) {
+            this.positionHistory.shift();
+        }
+
+        // 计算平滑后的位置
+        if (this.positionHistory.length > 1) {
+            const avgX = this.positionHistory.reduce((sum, p) => sum + p.x, 0) / this.positionHistory.length;
+            const avgY = this.positionHistory.reduce((sum, p) => sum + p.y, 0) / this.positionHistory.length;
+            this.handPosition = { x: avgX, y: avgY };
+        } else {
+            this.handPosition = { x: palmCenter.x, y: palmCenter.y };
+        }
 
         const rawGesture = this.classifyGesture(landmarks);
         const stableGesture = this.pushAndGetStableGesture(rawGesture);
@@ -203,11 +251,8 @@ export class GestureRecognizer {
 
         if (this.isOkGesture(states, landmarks, palmScale)) return 'ok';
         if (this.isIndexUpGesture(states, landmarks, palmScale)) return 'thumbsup';
-        if (isOpen && !isClosed) return 'open';
-        if (isClosed && !isOpen) return 'closed';
-        if (isOpen && isClosed) {
-            return states.openScore >= states.closedScore ? 'open' : 'closed';
-        }
+        if (isOpen) return 'open';
+        if (isClosed) return 'closed';
         return 'none';
     }
 
@@ -235,7 +280,10 @@ export class GestureRecognizer {
     }
 
     getFingerStates(landmarks, palmScale) {
+        // MediaPipe标准方法：使用手掌中心点和指尖位置比较
         const wrist = landmarks[0];
+        const palmCenter = landmarks[9]; // 中指MCP，作为手掌中心参考点
+        
         const fingers = {
             index: { mcp: 5, pip: 6, dip: 7, tip: 8 },
             middle: { mcp: 9, pip: 10, dip: 11, tip: 12 },
@@ -246,253 +294,147 @@ export class GestureRecognizer {
         const states = {};
         let extendedCount = 0;
         let curledCount = 0;
-        let foldedCount = 0;
-        const openRatios = [];
-        const extensionScores = [];
 
-        // 优化：使用更精确的手指伸展/卷曲检测
+        // 检测四根手指（除拇指外）
         for (const [name, f] of Object.entries(fingers)) {
-            const mcp = landmarks[f.mcp];
             const pip = landmarks[f.pip];
-            const dip = landmarks[f.dip];
             const tip = landmarks[f.tip];
-
-            // 3D角度更准确
-            const pipAngle = this.angle(mcp, pip, dip);
-            const dipAngle = this.angle(pip, dip, tip);
-            const avgAngle = (pipAngle + dipAngle) / 2;
-
-            // 距离测量：指尖到手腕 vs 指关节到手腕
-            const tipDist = this.distance3(tip, wrist);
-            const mcpDist = this.distance3(mcp, wrist);
-            const pipDist = this.distance3(pip, wrist);
-            const extensionGap = tipDist - mcpDist;
-
-            // 指尖到掌心的距离
-            const tipPalmDist = this.distance3(tip, landmarks[9]);
-            const mcpPalmDist = this.distance3(mcp, landmarks[9]);
-
-            // 垂直方向伸展检测
-            const yExtension = wrist.y - tip.y;
-            const yExtensionNorm = yExtension / palmScale;
-
-            // 综合伸展分数 (0-1)
-            let extScore = 0;
-            if (avgAngle > 155) extScore += 0.4;
-            else if (avgAngle > 140) extScore += 0.2;
-            else if (avgAngle < 110) extScore -= 0.3;
-
-            if (extensionGap > palmScale * 0.08) extScore += 0.3;
-            else if (extensionGap < palmScale * 0.02) extScore -= 0.2;
-
-            if (yExtensionNorm > 0.15) extScore += 0.3;
-            else if (yExtensionNorm < 0.05) extScore -= 0.2;
-
-            extensionScores.push(extScore);
-
-            const extended = extScore >= 0.5;
-            const curled = extScore <= -0.2;
+            
+            // MediaPipe推荐方法：比较指尖和PIP关节的Y坐标
+            // 如果指尖Y坐标小于PIP关节Y坐标（在屏幕上更高），则手指伸展
+            // 这是最简单且最可靠的方法
+            const isExtended = tip.y < pip.y;
+            
+            // 额外验证：计算指尖到手掌中心的距离，确保手指真正伸展
+            const tipToPalmDist = this.distance2(tip, palmCenter);
+            const pipToPalmDist = this.distance2(pip, palmCenter);
+            const extensionRatio = tipToPalmDist / Math.max(pipToPalmDist, 1e-6);
+            
+            // 结合Y坐标和距离比例判断
+            const extended = isExtended && extensionRatio > 0.85;
+            const curled = !isExtended && extensionRatio < 0.75;
 
             states[name] = {
                 extended,
                 curled,
-                extensionScore: extScore,
-                tipPalmRatio: tipPalmDist / Math.max(mcpPalmDist, 1e-6)
+                extensionRatio,
+                isExtended: isExtended // 原始Y坐标判断
             };
 
             if (extended) extendedCount++;
             if (curled) curledCount++;
-            if (tipPalmDist < mcpPalmDist + palmScale * 0.01) foldedCount++;
-            openRatios.push(states[name].tipPalmRatio);
         }
 
-        // 优化拇指检测
-        const thumbMcp = landmarks[2];
+        // 拇指检测 - 使用不同的方法（拇指运动方向不同）
         const thumbIp = landmarks[3];
         const thumbTip = landmarks[4];
-        const thumbAngle = this.angle(thumbMcp, thumbIp, thumbTip);
-        const thumbTipDist = this.distance3(thumbTip, wrist);
-        const thumbMcpDist = this.distance3(thumbMcp, wrist);
-        const thumbGap = thumbTipDist - thumbMcpDist;
+        const thumbMcp = landmarks[2];
+        
+        // 拇指：比较拇指尖和拇指IP的X坐标（拇指在水平方向运动）
+        // 对于右手：拇指尖X > 拇指IP X 表示伸展
+        // 为了兼容左右手，使用距离判断
+        const thumbTipToWrist = this.distance2(thumbTip, wrist);
+        const thumbMcpToWrist = this.distance2(thumbMcp, wrist);
+        const thumbExtensionRatio = thumbTipToWrist / Math.max(thumbMcpToWrist, 1e-6);
+        
+        // 拇指伸展判断
+        const thumbExtended = thumbExtensionRatio > 1.2;
+        const thumbCurled = thumbExtensionRatio < 0.9;
 
-        // 拇指向外伸展的判断更精确
-        const thumbExtScore = ((thumbAngle > 150) ? 0.5 : (thumbAngle < 120 ? -0.3 : 0)) +
-                             ((thumbGap > palmScale * 0.05) ? 0.5 : (thumbGap < palmScale * 0.015 ? -0.3 : 0));
-
-        const thumbExtended = thumbExtScore >= 0.5;
-        const thumbCurled = thumbExtScore <= -0.3;
-
-        states.thumb = { extended: thumbExtended, curled: thumbCurled, extensionScore: thumbExtScore };
+        states.thumb = { 
+            extended: thumbExtended, 
+            curled: thumbCurled, 
+            extensionRatio: thumbExtensionRatio 
+        };
         states.extendedCount = extendedCount;
         states.curledCount = curledCount;
-        states.foldedCount = foldedCount;
-        states.openRatioAvg = openRatios.reduce((sum, v) => sum + v, 0) / Math.max(openRatios.length, 1);
-        states.openRatioMin = Math.min(...openRatios);
-        states.openRatioMax = Math.max(...openRatios);
-        states.extensionScores = extensionScores;
-        states.avgExtensionScore = extensionScores.reduce((sum, v) => sum + v, 0) / Math.max(extensionScores.length, 1);
-
-        // 改进分数计算
-        states.openScore = extendedCount + (thumbExtended ? 0.6 : 0) + states.avgExtensionScore * 0.5;
-        states.closedScore = curledCount + (thumbCurled ? 0.6 : 0) - states.avgExtensionScore * 0.3;
 
         return states;
     }
 
     isHandOpenGesture(states) {
-        // 张开手势：至少3-4根手指伸展
-        const openByCount = states.extendedCount >= 3;
-
-        // 核心手指（食指、中指）都伸展
-        const coreExtended = states.index.extended && states.middle.extended;
-
-        // 伸展分数较高
-        const highExtensionScore = states.avgExtensionScore > 0.2;
-
-        // 比率较高（手指远离手掌）
-        const highRatio = states.openRatioAvg > 1.15;
-
-        // 卷曲的手指不超过2个
-        const fewCurled = states.curledCount <= 2;
-
-        // 综合判定 - 使用计分制
-        let score = 0;
-        if (states.extendedCount >= 4) score += 2;
-        else if (states.extendedCount >= 3) score += 1;
-
-        if (coreExtended) score += 1;
-        if (highExtensionScore) score += 1;
-        if (highRatio) score += 1;
-        if (fewCurled) score += 1;
-
-        return score >= 4;
+        // 简化判断：至少4根手指伸展（包括或不包括拇指）
+        // 或者至少3根非拇指手指伸展且拇指也伸展
+        const nonThumbExtended = states.extendedCount;
+        
+        if (nonThumbExtended >= 4) {
+            return true; // 四根手指都伸展，明显是张开
+        }
+        
+        if (nonThumbExtended >= 3 && states.thumb.extended) {
+            return true; // 三根手指+拇指伸展
+        }
+        
+        // 核心手指（食指、中指）都伸展，且至少还有一根其他手指伸展
+        if (states.index.extended && states.middle.extended && nonThumbExtended >= 2) {
+            return true;
+        }
+        
+        return false;
     }
 
     isHandClosedGesture(states) {
-        // 握拳手势：主要判断依据
-        // 1. 没有手指明确伸展（或最多1个）
+        // 简化判断：握拳时大部分手指应该卷曲
+        // 1. 伸展的手指不超过1根（允许拇指单独伸展）
         const fewExtended = states.extendedCount <= 1;
-
-        // 2. 至少3根手指卷曲或折叠
-        const curledOrFolded = states.curledCount >= 2 || states.foldedCount >= 3;
-
-        // 3. 手指都接近手掌（比率低）
-        const closedByRatio = states.openRatioAvg < 1.08;
-
-        // 4. 伸展分数低（表示手指没有伸展）
-        const lowExtensionScore = states.avgExtensionScore < 0.1;
-
-        // 5. 核心手指（食指、中指）至少有一个不伸展
-        const coreNotExtended = !states.index.extended || !states.middle.extended;
-
-        // 放宽条件：满足多个条件中的大部分即可
-        const satisfiedConditions =
-            (fewExtended ? 1 : 0) +
-            (curledOrFolded ? 1 : 0) +
-            (closedByRatio ? 1 : 0) +
-            (lowExtensionScore ? 1 : 0) +
-            (coreNotExtended ? 1 : 0);
-
-        return satisfiedConditions >= 3;
+        
+        // 2. 核心手指（食指、中指）都不伸展
+        const coreClosed = !states.index.extended && !states.middle.extended;
+        
+        // 3. 至少3根手指卷曲
+        const mostCurled = states.curledCount >= 3;
+        
+        // 满足核心条件：核心手指闭合，且很少手指伸展
+        return coreClosed && fewExtended;
     }
 
     isIndexUpGesture(states, landmarks, palmScale) {
-        // 基本条件：食指必须伸展，其他手指必须卷曲
-        if (!states.index.extended || states.index.extensionScore < 0.6) return false;
+        // 基本条件：食指必须伸展，其他手指（除拇指）必须卷曲
+        if (!states.index.extended) return false;
         if (states.middle.extended || states.ring.extended || states.pinky.extended) return false;
 
-        // 至少2个其他手指明确卷曲
+        // 至少2根其他手指卷曲（中指、无名指、小指中至少2根）
         if (states.curledCount < 2) return false;
 
-        const wrist = landmarks[0];
         const indexTip = landmarks[8];
-        const indexMcp = landmarks[5];
-        const indexPip = landmarks[6];
-        const thumbTip = landmarks[4];
         const middleTip = landmarks[12];
+        const ringTip = landmarks[16];
+        const pinkyTip = landmarks[20];
 
-        // 1. 垂直度检测：食指应该明显向上
-        const indexUpVector = this.normalize(this.vector(indexTip, indexMcp), { x: 0, y: -1, z: 0 });
-        const verticalScore = -indexUpVector.y; // 负号因为y坐标向下为正
+        // 食指应该明显高于其他手指的指尖
+        const otherTips = [middleTip.y, ringTip.y, pinkyTip.y];
+        const minOtherY = Math.min(...otherTips);
+        const indexMuchHigher = indexTip.y < minOtherY - palmScale * 0.05;
 
-        // 2. 食指明显高于其他手指
-        const indexMuchHigher = indexTip.y < middleTip.y - palmScale * 0.08;
-        const indexAboveThumb = !states.thumb.extended || indexTip.y < thumbTip.y - palmScale * 0.03;
-
-        // 3. 食指直线度检测：PIP关节应该接近直线
-        const indexStraightness = this.angle(landmarks[5], landmarks[6], landmarks[7]);
-        const indexIsStraight = indexStraightness > 160;
-
-        // 4. 食指相对于手腕和MCP的高度
-        const indexAboveMcp = indexTip.y < indexMcp.y - palmScale * 0.06;
-        const indexAboveWrist = indexTip.y < wrist.y - palmScale * 0.10;
-
-        // 5. 检查食指是否真正伸展（距离）
-        const indexLen = this.distance3(indexTip, indexMcp);
-        const expectedIndexLen = palmScale * 0.45;
-        const indexLongEnough = indexLen > expectedIndexLen * 0.7;
-
-        // 综合判定
-        const verticalCheck = verticalScore > 0.65;
-        const heightCheck = indexMuchHigher && indexAboveThumb && indexAboveMcp && indexAboveWrist;
-        const structureCheck = indexIsStraight && indexLongEnough;
-
-        return verticalCheck && heightCheck && structureCheck;
+        return indexMuchHigher;
     }
 
     isOkGesture(states, landmarks, palmScale) {
         const thumbTip = landmarks[4];
         const indexTip = landmarks[8];
-        const indexMcp = landmarks[5];
-        const thumbMcp = landmarks[2];
         const middleTip = landmarks[12];
         const ringTip = landmarks[16];
         const pinkyTip = landmarks[20];
-        const wrist = landmarks[0];
 
-        // 1. 检测拇指和食指的捏合距离（放宽范围）
-        const pinchDist = this.distance3(thumbTip, indexTip);
+        // 1. 拇指和食指的捏合距离（核心判断）
+        const pinchDist = this.distance2(thumbTip, indexTip);
         const pinchRatio = pinchDist / palmScale;
+        const pinchOk = pinchRatio < 0.15; // 拇指和食指足够接近
 
-        // OK手势的捏合距离范围更宽松
-        const pinchOk = pinchRatio > 0.02 && pinchRatio < 0.20;
+        // 2. 其他手指应该伸展（至少2根）
+        const otherExtended = (states.middle.extended ? 1 : 0) +
+                             (states.ring.extended ? 1 : 0) +
+                             (states.pinky.extended ? 1 : 0);
+        const othersOk = otherExtended >= 2;
 
-        // 2. 拇指和食指相对接近（放宽条件）
-        const thumbIndexHorizontalDist = Math.abs(thumbTip.x - indexTip.x);
-        const thumbIndexVerticalDist = Math.abs(thumbTip.y - indexTip.y);
-        const thumbIndexClose = thumbIndexHorizontalDist < palmScale * 0.15 &&
-                               thumbIndexVerticalDist < palmScale * 0.15;
-
-        // 3. 确保不是完全握拳（拇指和食指有一定伸展）
-        const indexLen = this.distance3(indexTip, indexMcp);
-        const thumbLen = this.distance3(thumbTip, thumbMcp);
-        const indexTipDist = this.distance3(indexTip, wrist);
-        const indexMcpDist = this.distance3(indexMcp, wrist);
-        const notFist = indexLen > palmScale * 0.03 && indexTipDist > indexMcpDist;
-
-        // 4. 其他手指状态 - 放宽条件
-        const otherCount = (states.middle.extended ? 1 : 0) +
-                          (states.ring.extended ? 1 : 0) +
-                          (states.pinky.extended ? 1 : 0);
-
-        // 至少1个其他手指伸展，或者不完全卷曲
-        const othersOk = otherCount >= 1 || states.curledCount <= 3;
-
-        // 5. 检查其他手指是否明显高于捏合点（避免误判握拳）
-        const maxOtherTipY = Math.min(middleTip.y, ringTip.y, pinkyTip.y);
+        // 3. 其他手指应该高于或接近捏合点（避免误判握拳）
         const pinchY = (thumbTip.y + indexTip.y) / 2;
-        const othersHigherOrLevel = maxOtherTipY <= pinchY + palmScale * 0.05;
+        const otherTips = [middleTip.y, ringTip.y, pinkyTip.y];
+        const maxOtherY = Math.max(...otherTips);
+        const othersHigher = maxOtherY <= pinchY + palmScale * 0.08;
 
-        // 综合判定 - 使用计分制，降低门槛
-        let score = 0;
-        if (pinchOk) score += 2; // 捏合是最重要的
-        if (thumbIndexClose) score += 1;
-        if (notFist) score += 1;
-        if (othersOk) score += 1;
-        if (othersHigherOrLevel) score += 1;
-
-        // 只需要4分以上就算OK手势
-        return score >= 4;
+        // 综合判定：捏合 + 其他手指伸展
+        return pinchOk && othersOk && othersHigher;
     }
 
     getPalmScale(landmarks) {
