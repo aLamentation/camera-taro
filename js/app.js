@@ -103,6 +103,22 @@ class TarotApp {
             closeBtn.addEventListener('click', () => this.resetForNewReading());
         }
 
+        // 手势面板最小化/展开
+        const gesturePanel = document.getElementById('gesture-panel');
+        const gesturePanelToggle = document.getElementById('gesture-panel-toggle');
+        if (gesturePanel && gesturePanelToggle) {
+            gesturePanelToggle.addEventListener('click', (e) => {
+                e.stopPropagation();
+                gesturePanel.classList.toggle('minimized');
+            });
+            // 最小化状态下点击面板标题也可以展开
+            gesturePanel.addEventListener('click', (e) => {
+                if (gesturePanel.classList.contains('minimized') && e.target.closest('h3')) {
+                    gesturePanel.classList.remove('minimized');
+                }
+            });
+        }
+
         // 键盘控制 (调试用)
         document.addEventListener('keydown', (e) => {
             if (e.key === '1') {
