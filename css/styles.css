@@ -39,6 +39,14 @@ body {
     color: var(--text-light);
     overflow: hidden;
     min-height: 100vh;
+    /* 移动端优化 */
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+    touch-action: manipulation;
+    /* 防止iOS Safari缩放 */
+    -webkit-text-size-adjust: 100%;
 }
 
 /* ============================================
@@ -507,51 +515,283 @@ body {
 }
 
 /* ============================================
-   响应式调整
+   响应式调整 - 移动端优化
    ============================================ */
+
+/* 小屏幕设备（手机竖屏） */
 @media (max-width: 768px) {
+    /* 摄像头容器 - 移动端优化 */
     #camera-container {
-        width: 160px;
-        height: 120px;
+        width: 140px;
+        height: 105px;
+        bottom: 10px;
+        right: 10px;
+        border-radius: 12px;
+        border-width: 2px;
+    }
+    
+    #camera-status {
+        bottom: 4px;
+        left: 4px;
+        padding: 3px 8px;
+        font-size: 10px;
+        gap: 4px;
+    }
+    
+    .status-dot {
+        width: 6px;
+        height: 6px;
+    }
+    
+    /* 手势面板 - 移动端布局 */
+    #gesture-panel {
+        top: auto;
+        bottom: 125px;
+        left: 10px;
+        right: 10px;
+        padding: 12px;
+        min-width: auto;
+        max-height: calc(100vh - 145px);
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    
+    #gesture-panel h3 {
+        font-size: 13px;
+        margin-bottom: 10px;
+        letter-spacing: 1px;
+    }
+    
+    .gesture-item {
+        padding: 8px 10px;
+        margin-bottom: 6px;
+        gap: 10px;
+    }
+    
+    .gesture-icon {
+        font-size: 18px;
+        min-width: 28px;
+    }
+    
+    .gesture-text {
+        font-size: 11px;
+        line-height: 1.4;
+    }
+    
+    /* 状态指示器 */
+    #state-icon {
+        font-size: 50px;
+        margin-bottom: 10px;
+    }
+    
+    #state-text {
+        font-size: 18px;
+        letter-spacing: 2px;
+    }
+    
+    /* 卡牌信息面板 */
+    #card-info-panel {
+        padding: 20px;
+        width: 95%;
+        max-width: none;
+        border-radius: 20px;
+    }
+    
+    .close-btn {
+        width: 32px;
+        height: 32px;
+        font-size: 22px;
+        top: 10px;
+        right: 10px;
+    }
+
+    .card-info-kicker {
+        letter-spacing: 3px;
+        font-size: 11px;
+    }
+    
+    .card-info-subtitle {
+        font-size: 10px;
+        letter-spacing: 3px;
+    }
+    
+    #card-image {
+        width: 150px;
+        height: 240px;
+        margin: 8px auto 18px;
+    }
+    
+    #card-name {
+        font-size: 20px;
+        margin-bottom: 12px;
+        letter-spacing: 1px;
+    }
+    
+    #card-meaning {
+        font-size: 14px;
+        line-height: 1.6;
+        margin-bottom: 20px;
+    }
+    
+    .primary-btn {
+        padding: 12px 30px;
+        font-size: 14px;
+        border-radius: 25px;
+    }
+    
+    /* 加载动画 */
+    .tarot-spinner {
+        width: 60px;
+        height: 90px;
+        margin-bottom: 20px;
+    }
+    
+    .loader p {
+        font-size: 16px;
+        letter-spacing: 2px;
+    }
+}
+
+/* 超小屏幕设备（小手机） */
+@media (max-width: 480px) {
+    #camera-container {
+        width: 120px;
+        height: 90px;
+        bottom: 8px;
+        right: 8px;
+    }
+    
+    #gesture-panel {
+        bottom: 110px;
+        left: 8px;
+        right: 8px;
+        padding: 10px;
+    }
+    
+    #gesture-panel h3 {
+        font-size: 12px;
+    }
+    
+    .gesture-item {
+        padding: 6px 8px;
+        margin-bottom: 5px;
+    }
+    
+    .gesture-icon {
+        font-size: 16px;
+        min-width: 24px;
+    }
+    
+    .gesture-text {
+        font-size: 10px;
+    }
+    
+    #state-icon {
+        font-size: 40px;
+    }
+    
+    #state-text {
+        font-size: 16px;
+    }
+    
+    #card-info-panel {
+        padding: 15px;
+    }
+    
+    #card-image {
+        width: 120px;
+        height: 192px;
+    }
+    
+    #card-name {
+        font-size: 18px;
+    }
+    
+    #card-meaning {
+        font-size: 13px;
+    }
+}
+
+/* 横屏模式 */
+@media (max-width: 768px) and (orientation: landscape) {
+    #camera-container {
+        width: 180px;
+        height: 135px;
         bottom: 10px;
         right: 10px;
     }
     
     #gesture-panel {
-        top: auto;
-        bottom: 140px;
+        top: 10px;
+        bottom: auto;
         left: 10px;
-        right: 10px;
-        padding: 15px;
+        right: auto;
+        width: 200px;
+        max-height: calc(100vh - 20px);
     }
     
-    #gesture-panel h3 {
-        font-size: 14px;
+    #state-icon {
+        font-size: 45px;
+    }
+    
+    #state-text {
+        font-size: 16px;
+    }
+}
+
+/* 触摸设备优化 */
+@media (hover: none) and (pointer: coarse) {
+    /* 移除hover效果，使用active代替 */
+    .close-btn:hover,
+    .primary-btn:hover {
+        transform: none;
+    }
+    
+    .close-btn:active {
+        background: rgba(255, 255, 255, 0.2);
+        transform: scale(0.95);
+    }
+    
+    .primary-btn:active {
+        transform: translateY(0) scale(0.98);
+        box-shadow: 0 5px 20px rgba(212, 175, 55, 0.4);
+    }
+    
+    /* 增加触摸目标大小 */
+    .close-btn {
+        width: 44px;
+        height: 44px;
+        min-width: 44px;
+        min-height: 44px;
+    }
+    
+    .primary-btn {
+        min-height: 48px;
+        padding: 14px 35px;
     }
     
     .gesture-item {
-        padding: 8px 10px;
+        min-height: 44px;
     }
-    
-    .gesture-icon {
-        font-size: 16px;
-        min-width: 30px;
-    }
-    
-    .gesture-text {
-        font-size: 11px;
-    }
-    
-    #card-info-panel {
-        padding: 25px;
-    }
+}
 
-    .card-info-kicker {
-        letter-spacing: 4px;
-        font-size: 12px;
+/* 高DPI屏幕优化 */
+@media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
+    #camera-container {
+        border-width: 1.5px;
+    }
+}
+
+/* 防止iOS Safari的橡皮筋效果 */
+@supports (-webkit-touch-callout: none) {
+    body {
+        position: fixed;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
     }
     
-    #card-name {
-        font-size: 22px;
+    #canvas-container {
+        -webkit-overflow-scrolling: touch;
     }
 }

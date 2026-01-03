@@ -76,13 +76,21 @@ export class GestureRecognizer {
 
         this.hands.onResults((results) => this.onResults(results));
 
-        // 提高摄像头分辨率以获得更清晰的识别效果
+        // 根据设备类型调整摄像头分辨率
+        const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+        const isSmallScreen = window.innerWidth < 768;
+        
+        // 移动端使用较低分辨率以提升性能，桌面端使用较高分辨率
+        const cameraWidth = (isMobile || isSmallScreen) ? 640 : 1280;
+        const cameraHeight = (isMobile || isSmallScreen) ? 480 : 720;
+
         this.camera = new Camera(this.videoElement, {
             onFrame: async () => {
                 await this.hands.send({ image: this.videoElement });
             },
-            width: 1280,   // 提高分辨率
-            height: 720    // 提高分辨率
+            width: cameraWidth,
+            height: cameraHeight,
+            facingMode: 'user' // 使用前置摄像头
         });
 
         await this.camera.start();
